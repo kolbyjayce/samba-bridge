@@ -1,2 +1,2 @@
-export { SMBConnector } from './SMBConnector';
+export { SMBClient } from './SMBClient';
 export * from './types';
