@@ -1,13 +1,15 @@
 # samba-bridge
+
 SMB connections that allows file system operations cross platform in NodeJS
 
 ### Use
 
-Initialize a new connection 
+Initialize a new connection
 
 `const smb = new SMBClient(SMBOptions)`
 
 SMB Options have 3 required fields
+
 ```
 host: string,
 username: string,

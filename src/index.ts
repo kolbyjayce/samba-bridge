@@ -1,2 +1,2 @@
-export { SMBClient } from './SMBClient';
-export * from './types';
+export { SMB } from "./SMB";
+export * from "./types";
