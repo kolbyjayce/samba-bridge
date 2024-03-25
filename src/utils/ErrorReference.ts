@@ -1,4 +1,17 @@
-const getStatus = (errorCode) => {
+interface IErrorValues {
+  code: string;
+  message: string;
+  value?: number;
+  valueHex?: string;
+  facility?: IErrorValues;
+  severity?: IErrorValues;
+}
+
+interface IError {
+  [key: number | string]: IErrorValues;
+}
+
+const getStatus = (errorCode: number) => {
   const hex = `0x${("00000000" + errorCode.toString(16)).toUpperCase().substr(-8)}`;
   const err = ntStatus[hex] ||
     win32ErrorCodes[hex] || {
@@ -25,12 +38,12 @@ const getStatus = (errorCode) => {
   return err;
 };
 
-const getErrorMessage = (err) =>
+const getErrorMessage = (err: any) =>
   `${err.code} (${err.valueHex}) : ${err.message}`;
 
 export { getStatus, getErrorMessage };
 
-const severities = {
+const severities: IError = {
   0: {
     code: "STATUS_SEVERITY_SUCCESS",
     message: "Success",
@@ -49,7 +62,7 @@ const severities = {
   },
 };
 
-const facilities = {
+const facilities: IError = {
   0: {
     code: "FACILITY_NULL",
     message: "The default facility code.",
@@ -264,7 +277,7 @@ const facilities = {
   },
 };
 
-const ntStatus = {
+const ntStatus: IError = {
   "0x00000000": {
     code: "STATUS_SUCCESS",
     message: "The operation completed successfully.",
@@ -8398,7 +8411,7 @@ const ntStatus = {
   },
 };
 
-const win32ErrorCodes = {
+const win32ErrorCodes: IError = {
   "0x00000000": {
     code: "ERROR_SUCCESS",
     message: "The operation completed successfully.",

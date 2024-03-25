@@ -1,12 +1,19 @@
 import { Buffer } from "buffer";
-import { structures } from "../utils/Structures";
 import { Socket } from "net";
+
+import { structures } from "../utils/Structures";
+
+import { IStructure, IStructureOptions } from "../types/Structures";
+import { ICommandTranslations, IHeaderTranslations } from "../types/SMBMessage";
+
+type HeaderEntry = [string, number] | [string, number, any];
 
 interface IHeader {
     [key: string]: any;
 }
 
 interface IRequest {
+    request?: [string, number | string, any][];
     [key: string]: any;
 }
 
@@ -22,7 +29,7 @@ const protocolId = Buffer.from([
 ]);
 const headerLength = 64;
 
-const headerTranslates = {
+const headerTranslates: IHeaderTranslations = {
     'Command': {
         'NEGOTIATE': 0x0000
         , 'SESSION_SETUP': 0x0001
@@ -58,8 +65,11 @@ const flags = {
 export class SMBMessage {
     private headers: IHeader = {};
     private response: IResponse = {}; 
-    private request: IRequest;
-    private structure: any;
+    private request: IRequest = {};
+    private structure: IStructure = {
+        request: [],
+        response: []
+    };
     private isMessageIdSet: boolean = false;
     private isAsync: boolean = false;
 
@@ -73,13 +83,23 @@ export class SMBMessage {
         }
     }
 
-    public setHeaders(newHeaders) {
-        this.headers = { ...this.headers, ...newHeaders};
-        this.structure = structures[this.headers['Command'].toLowerCase()];
+    public setHeaders(newHeaders: IHeader): void {
+        this.headers = { ...this.headers, ...newHeaders };
+    
+        // Convert command to lowercase and search if key is in IStructureOptions
+        const commandKey: keyof IStructureOptions | null = (this.headers['Command'].toLowerCase() in structures)
+            ? this.headers['Command'].toLowerCase() as keyof IStructureOptions
+            : null;
+    
+        if (commandKey) {
+            this.structure = structures[commandKey];
+        } else {
+            throw new Error(`Unsupported command in structure lookup: ${commandKey}`);
+        }
     }
     public getHeaders() { return this.headers; }
 
-    private setRequest(req): void { this.request = req; }
+    private setRequest(req: IRequest): void { this.request = req; }
     public getResponse(): any { return this.response; }
 
     public getBuffer(connection: Socket): Buffer {
@@ -141,18 +161,19 @@ export class SMBMessage {
         return buffer.slice(offset, offset + length);
     }
     
-    private translate(key: string, value: any): any {
+    private translate(key: keyof IHeaderTranslations, value: any): any {
         if (headerTranslates[key] && typeof headerTranslates[key][value] !== 'undefined') {
-        return headerTranslates[key][value];
+            return headerTranslates[key][value];
         }
         return value;
     }
     
-    private unTranslate(key: string, value: any): any {
-        if (headerTranslates[key]) {
-            for (const t in headerTranslates[key]) {
-                if (headerTranslates[key][t] === value) {
-                return t;
+    private unTranslate(value: number): string | null {
+        const commandTranslations: ICommandTranslations = headerTranslates.Command;
+        for (const commandName in commandTranslations) {
+            if (Object.prototype.hasOwnProperty.call(commandTranslations, commandName)) {
+                if (commandTranslations[commandName] === value) {
+                    return commandName;
                 }
             }
         }
@@ -161,31 +182,40 @@ export class SMBMessage {
 
     //** Private Buffer Functions */
     private readHeaders(buffer: Buffer): void {
-        const header = this.isAsync ? this.headerAsync() : this.headerSync();
+        const header = this.isAsync ? this.headerAsync(this.headers.SessionId) : this.headerSync(this.headers.ProcessId, this.headers.SessionId);
         let offset = 0;
     
-        header.forEach(([name, length]: [string, number]) => {
-            const data = buffer.slice(offset, offset + length);
-            if(length <= 8) {
-                // For fields up to 8 bytes, interpret and potentially translate
-                this.headers[name] = this.unTranslate(name, this.bufferToData(data)) || this.bufferToData(data);
-            } else {
-                // For fields longer than 8 bytes, store the raw buffer slice directly
-                this.headers[name] = data;
+        // set headers of message
+        for (let i in header) {
+            let key = header[i][0];
+            let length = header[i][1];
+
+            this.headers[key] = this.readData(buffer, offset, length);
+
+            if (length <= 8) {
+                this.headers[key] = this.unTranslate(this.bufferToData(this.headers[key] as Buffer)) || this.headers[key];
             }
-            offset += length;
-        });
+            offset += length
+        }
     
-        // Assuming structures is a preloaded object with all necessary structures
-        this.structure = structures[this.headers['Command'].toLowerCase()];
+        // Set structure with typescript overhead type safety
+        const commandKey: keyof IStructureOptions | null = (this.headers['Command'].toLowerCase() in structures)
+        ? this.headers['Command'].toLowerCase() as keyof IStructureOptions
+        : null;
+
+        if (commandKey) {
+            this.structure = structures[commandKey];
+        } else {
+            throw new Error(`Unsupported command in structure lookup: ${commandKey}`);
+        }
     }
 
     private writeHeaders(buffer: Buffer): number {
-        const header = this.isAsync ? this.headerASync() : this.headerSync();
+        const header = this.isAsync ? this.headerAsync(this.headers.SessionId) : this.headerSync(this.headers.ProcessId, this.headers.SessionId);
         let offset = 0;
       
-        header.forEach(([name, length, defaultValue = 0]: [string, number, any]) => {
-            const value = this.translate(name, this.headers[name] || defaultValue);
+        header.forEach(([name, length, defaultValue = 0]: [string, number, any?]) => {
+            const value = this.translate(name as keyof IHeaderTranslations, this.headers[name] || defaultValue);
             this.writeData(buffer, value, offset, length);
             offset += length;
         });
@@ -201,16 +231,17 @@ export class SMBMessage {
         });
     }
 
-    private writeRequest(buffer: Buffer, offset: number): number {
-        const initOffset = offset;
+    private writeRequest(buffer: Buffer, initialOffset: number): number {
+        let offset = initialOffset;
         let needsRewrite = false;
         const tmpBuffer = Buffer.alloc(buffer.length);
-        offset = 0;
-
-        Object.entries(this.structure.request).forEach(([key, [_, lengthOrRef, defaultValue = 0]]: [string, [string, number | string, any]]) => {
-            let length = 1;
-
+    
+        (this.structure.request as [string, number | string, any][]).forEach(([key, lengthOrRef, defaultValue = 0]) => {
+            let length: number;
+            let value: any;
+    
             if (typeof lengthOrRef === 'string') {
+                // If length is a reference to another field, resolve it
                 this.request[key] = this.request[key] || '';
                 if (this.request[lengthOrRef] !== this.request[key].length) {
                     this.request[lengthOrRef] = this.request[key].length;
@@ -218,24 +249,29 @@ export class SMBMessage {
                 }
                 length = this.request[key].length;
             } else {
+                // If length is a number, use it directly
                 length = lengthOrRef || 1;
-                this.request[key] = this.request[key] || defaultValue;
+                this.request[key] = this.request[key] ?? defaultValue;
             }
-
-            this.writeData(tmpBuffer, this.request[key], offset, length);
+    
+            // Determine the value to write
+            value = this.request[key];
+            // Write the data to tmpBuffer at the current offset
+            this.writeData(tmpBuffer, value, offset, length);
             offset += length;
         });
-
+    
         if (needsRewrite) {
-            this.writeRequest(buffer, 0); // pls don't repeat forever...
+            this.writeRequest(tmpBuffer, 0);
         } else {
-            tmpBuffer.copy(buffer, initOffset, 0, offset);
+            // Copy from tmpBuffer to the original buffer
+            tmpBuffer.copy(buffer, initialOffset, 0, offset);
         }
-
+    
         return offset;
     }
 
-    private headerSync(processId, sessionId) {
+    private headerSync(processId: number, sessionId: number): Array<HeaderEntry> {
         return [
               ['ProtocolId',4,protocolId]
             , ['StructureSize',2,headerLength]
@@ -254,7 +290,7 @@ export class SMBMessage {
           ];
     }
 
-    private headerAsync(processId, sessionId) {
+    private headerAsync(sessionId: number): Array<HeaderEntry> {
         return [
               ['ProtocolId',4,protocolId]
             , ['StructureSize',2,headerLength]

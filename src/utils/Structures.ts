@@ -1,4 +1,6 @@
-export const structures = {
+import { IStructureOptions } from "../types/Structures";
+
+export const structures: IStructureOptions = {
   negotiate: {
     request: [
       ["StructureSize", 2, 36],
