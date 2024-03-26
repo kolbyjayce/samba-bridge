@@ -102,7 +102,7 @@ export class SMBMessage {
     private setRequest(req: IRequest): void { this.request = req; }
     public getResponse(): any { return this.response; }
 
-    public getBuffer(connection: Socket): Buffer {
+    public getBuffer(connection: any): Buffer {
         let buffer = Buffer.alloc(0xffff);
         let length = 0;
 

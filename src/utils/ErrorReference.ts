@@ -38,8 +38,9 @@ const getStatus = (errorCode: number) => {
   return err;
 };
 
-const getErrorMessage = (err: any) =>
-  `${err.code} (${err.valueHex}) : ${err.message}`;
+const getErrorMessage = (err: any) => {
+  return `${err.code} (${err.valueHex}) : ${err.message}`;
+}
 
 export { getStatus, getErrorMessage };
 
