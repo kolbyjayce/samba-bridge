@@ -1,28 +1,10 @@
 import { SMBMessage } from "./SMBMessage/SMBMessage";
 import * as messages from "./SMBMessage/MessageConstructor";
 import { Socket } from "net";
-
-
-interface IConnection {
-    socket: Socket;
-    debug?: boolean;
-    responses: Record<string, SMBMessage>;
-    responsesCB: Record<string, (message: SMBMessage) => void>;
-    responseBuffer: Buffer;
-    newResponse?: boolean;
-    SessionId?: string;
-    TreeId?: string;
-    ProcessId?: string;
-  }
+import { SMB } from "./SMB";
   
-  interface IParams {
-    FileId?: string;
-    FileInfoClass?: string;
-    Buffer?: any; 
-  }
-
 export class SMBClient {
-    static request(messageName: keyof typeof messages, params: IParams, connection: IConnection, cb: (message?: SMBMessage, error?: Error) => void) {
+    static request(messageName: keyof typeof messages, params: any, connection: SMB, cb: (message?: SMBMessage, error?: Error) => void) {
         const msg = messages[messageName];
         const smbMessage = msg.generate(connection, params);
     
@@ -33,7 +15,7 @@ export class SMBClient {
         this.getResponse(connection, smbMessage.getHeaders().MessageId, msg.parse(connection, cb));
     }
 
-    static response(connection: IConnection) {
+    static response(connection: any) {
         connection.responses = {};
         connection.responsesCB = {};
         connection.responseBuffer = Buffer.alloc(0);
@@ -87,7 +69,7 @@ export class SMBClient {
     }
 
     // Private functions
-    private static sendNetBiosMessage(connection: IConnection, message: SMBMessage): boolean {
+    private static sendNetBiosMessage(connection: any, message: SMBMessage): boolean {
         const smbRequest = message.getBuffer(connection);
 
         if (connection.debug) {
@@ -114,7 +96,7 @@ export class SMBClient {
         return true;
     }
 
-    private static getResponse(connection: IConnection, mId: number, cb: any) {
+    private static getResponse(connection: any, mId: number, cb: any) {
         const messageId = Buffer.alloc(4);
         messageId.writeUInt32LE(mId, 0);
         const messageIdString = messageId.toString('hex');

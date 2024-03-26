@@ -10,7 +10,7 @@ export const structures: IStructureOptions = {
       ["Capabilities", 4, 0],
       ["ClientGuid", 16, 0],
       ["ClientStartTime", 8, 0],
-      ["Dialects", 4, new Buffer([0x02, 0x02, 0x10, 0x02])],
+      ["Dialects", 4, Buffer.from([0x02, 0x02, 0x10, 0x02])],
     ],
     response: [
       ["StructureSize", 2],

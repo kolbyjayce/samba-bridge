@@ -2,9 +2,9 @@
 // Will generate a 32 bit integer split into the top and bottom 16 bits (high and low PID)
 export class PIDGenerator {
   private static nextPID: number = 1; //
-  private activePIDs: Set<number> = new Set();
+  private static activePIDs: Set<number> = new Set();
 
-  generatePID(): { PIDHigh: number; PIDLow: number } {
+  static generatePID(): Buffer { //{ PIDHigh: number; PIDLow: number } { // will change to PIDHigh/Low in the future
     let combinedPID = PIDGenerator.nextPID++;
 
     // Check and skip 0xFFFF in PIDLow
@@ -19,10 +19,11 @@ export class PIDGenerator {
 
     this.activePIDs.add(combinedPID);
 
-    return { PIDHigh, PIDLow };
+    // return { PIDHigh, PIDLow };
+    return Buffer.alloc(combinedPID);
   }
 
-  releasePID(PIDHigh: number, PIDLow: number): void {
+  static releasePID(PIDHigh: number, PIDLow: number): void {
     const combinedPID = (PIDHigh << 16) | PIDLow;
     this.activePIDs.delete(combinedPID);
   }

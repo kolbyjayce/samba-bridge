@@ -3,7 +3,7 @@ import { SMBClient } from "./SMBClient";
 import { SMB } from "./SMB";
 
 export class SMBConnection {
-    close(connection: any) {
+    static close(connection: any) {
         this.clearAutoCloseTimeout(connection);
         if (connection.connected) {
             connection.connected = false;
@@ -11,7 +11,7 @@ export class SMBConnection {
         };
     }
 
-    requireConnect(method: any): () => void {
+    static requireConnect(method: any): () => void {
         return () => {
             // const connection = this;
             const args = Array.prototype.slice.call(arguments);
@@ -29,11 +29,11 @@ export class SMBConnection {
         };
     }
 
-    init(connection: any) {
+    static init(connection: SMB) {
         connection.connected = false;
         connection.socket = new net.Socket({ allowHalfOpen: true });
 
-        connection.socket.on('data', SMBClient.response(connection));
+        connection.socket.on('data', SMBClient.response(connection as any));
 
         connection.errorHandler = [];
 
@@ -48,7 +48,7 @@ export class SMBConnection {
         });
     }
 
-    connect(connection: any, cb: any) {
+    static connect(connection: any, cb: any) {
         if (connection.connected) {
             cb && cb(null);
             return;
@@ -87,14 +87,14 @@ export class SMBConnection {
     }
 
     // Private Functions
-    private clearAutoCloseTimeout(connection: any) {
+    private static clearAutoCloseTimeout(connection: any) {
         if (connection.autoCloseTimeout) {
             clearTimeout(connection.scheduledAutoClose);
             connection.scheduledAutoClose = null;
         }
     }
 
-    private setAutoCloseTimeout(connection: any): void {
+    private static setAutoCloseTimeout(connection: any): void {
         this.clearAutoCloseTimeout(connection);
         if (connection.autoCloseTimeout != 0) {
             connection.scheduledAutoClose = setTimeout(() => {
@@ -103,7 +103,7 @@ export class SMBConnection {
         }
     }
 
-    private scheduleAutoClose(connection: any, cb: any): () => any {
+    private static scheduleAutoClose(connection: any, cb: any): () => any {
         this.addErrorListener(connection, cb);
         this.clearAutoCloseTimeout(connection);
 
@@ -115,11 +115,12 @@ export class SMBConnection {
     }
 
     // private error handlers
-    private addErrorListener(connection: any, callback: any): void {
+    private static addErrorListener(connection: any, callback: any): void {
+        console.log(connection.errorHandler);
         connection.errorHandler.unshift(callback);
     }
 
-    private removeErrorListener(connection: any): void {
+    private static removeErrorListener(connection: any): void {
         connection.errorHandler.shift();
     }
 }

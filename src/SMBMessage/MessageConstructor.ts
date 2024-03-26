@@ -137,7 +137,7 @@ const query_directory = message({
             }
             , request:{
                 'FileId':params.FileId
-                , 'Buffer':new Buffer('*', 'ucs2') // need to figure out how to convert '*' to Buffer.alloc method
+                , 'Buffer': Buffer.from('*', 'ucs2')
             }
         })
     }
