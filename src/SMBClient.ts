@@ -22,7 +22,7 @@ interface IConnection {
   }
 
 export class SMBClient {
-    request(messageName: keyof typeof messages, params: IParams, connection: IConnection, cb: (message?: SMBMessage, error?: Error) => void) {
+    static request(messageName: keyof typeof messages, params: IParams, connection: IConnection, cb: (message?: SMBMessage, error?: Error) => void) {
         const msg = messages[messageName];
         const smbMessage = msg.generate(connection, params);
     
@@ -39,55 +39,55 @@ export class SMBClient {
         connection.responseBuffer = Buffer.alloc(0);
     
         return (response: Buffer) => {
-          // Concatenate new response with the existing buffer
-          connection.responseBuffer = Buffer.concat([connection.responseBuffer, response]);
-    
-          // Extract complete messages
-          let extract = true;
-          while (extract) {
-            extract = false;
-    
-            // Check if the buffer has at least the header size (4 bytes for NetBIOS)
-            if (connection.responseBuffer.length >= 4) {
-              // Message length is in the NetBIOS header; 1 byte for type + 3 bytes for length
-              const msgLength = (connection.responseBuffer.readUInt8(1) << 16) + connection.responseBuffer.readUInt16BE(2);
-    
-              // Check if the complete message is received (message length + 4 bytes header)
-              if (connection.responseBuffer.length >= msgLength + 4) {
-                extract = true;
-    
-                // Parse the SMB2 message from the buffer
-                const messageBuffer = connection.responseBuffer.slice(4, msgLength + 4);
-                const message = new SMBMessage();
-                message.parseBuffer(messageBuffer);
-    
-                // Optionally log the response
-                if (connection.debug) {
-                  console.log('--response');
-                  console.log(messageBuffer.toString('hex'));
+            // Concatenate new response with the existing buffer
+            connection.responseBuffer = Buffer.concat([connection.responseBuffer, response]);
+        
+            // Extract complete messages
+            let extract = true;
+            while (extract) {
+                extract = false;
+        
+                // Check if the buffer has at least the header size (4 bytes for NetBIOS)
+                if (connection.responseBuffer.length >= 4) {
+                    // Message length is in the NetBIOS header; 1 byte for type + 3 bytes for length
+                    const msgLength = (connection.responseBuffer.readUInt8(1) << 16) + connection.responseBuffer.readUInt16BE(2);
+            
+                    // Check if the complete message is received (message length + 4 bytes header)
+                    if (connection.responseBuffer.length >= msgLength + 4) {
+                        extract = true;
+            
+                        // Parse the SMB2 message from the buffer
+                        const messageBuffer = connection.responseBuffer.slice(4, msgLength + 4);
+                        const message = new SMBMessage();
+                        message.parseBuffer(messageBuffer);
+            
+                        // Optionally log the response
+                        if (connection.debug) {
+                        console.log('--response');
+                        console.log(messageBuffer.toString('hex'));
+                        }
+            
+                        // Get the message ID as a hex string
+                        const mId = message.getHeaders().MessageId.toString('hex');
+            
+                        // Dispatch the message if a callback is waiting, or store it
+                        if (connection.responsesCB[mId]) {
+                        connection.responsesCB[mId](message);
+                        delete connection.responsesCB[mId];
+                        } else {
+                        connection.responses[mId] = message;
+                        }
+            
+                        // Remove the processed message from the response buffer
+                        connection.responseBuffer = connection.responseBuffer.slice(msgLength + 4);
+                    }
                 }
-    
-                // Get the message ID as a hex string
-                const mId = message.getHeaders().MessageId.toString('hex');
-    
-                // Dispatch the message if a callback is waiting, or store it
-                if (connection.responsesCB[mId]) {
-                  connection.responsesCB[mId](message);
-                  delete connection.responsesCB[mId];
-                } else {
-                  connection.responses[mId] = message;
-                }
-    
-                // Remove the processed message from the response buffer
-                connection.responseBuffer = connection.responseBuffer.slice(msgLength + 4);
-              }
             }
-          }
         };
-      }
+    }
 
     // Private functions
-    private sendNetBiosMessage(connection: IConnection, message: SMBMessage): boolean {
+    private static sendNetBiosMessage(connection: IConnection, message: SMBMessage): boolean {
         const smbRequest = message.getBuffer(connection);
 
         if (connection.debug) {
@@ -114,7 +114,7 @@ export class SMBClient {
         return true;
     }
 
-    private getResponse(connection: IConnection, mId: number, cb: any) {
+    private static getResponse(connection: IConnection, mId: number, cb: any) {
         const messageId = Buffer.alloc(4);
         messageId.writeUInt32LE(mId, 0);
         const messageIdString = messageId.toString('hex');

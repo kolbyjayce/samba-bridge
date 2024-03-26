@@ -1,100 +1,125 @@
-// import * as net from "net";
-// import { SMBClient } from "./SMB";
-// import { ReponseHandler } from "./ResponseHandler";
+import * as net from "net";
+import { SMBClient } from "./SMBClient";
+import { SMB } from "./SMB";
 
-// export class SMBConnection {
-//     private socket: net.Socket = new net.Socket({ allowHalfOpen: true });
-//     private connected: boolean = false;
-//     private scheduledAutoClose: NodeJS.Timeout | null = null;
-//     private responseHandler: ResponseHandler = new ResponseHandler()
+export class SMBConnection {
+    close(connection: any) {
+        this.clearAutoCloseTimeout(connection);
+        if (connection.connected) {
+            connection.connected = false;
+            connection.socket.end();
+        };
+    }
 
-//     constructor(private client: SMBClient) {
-//         this.setupEventListeners();
-//     }
+    requireConnect(method: any): () => void {
+        return () => {
+            // const connection = this;
+            const args = Array.prototype.slice.call(arguments);
+            this.connect(this, (err: any) => {
+                const cb = args.pop();
+                cb.scheduledAutoClose(this, cb);
+                args.push(cb);
 
-//     private setupEventListeners(): void {
-//         // set socket event listeners
-//         this.socket.on('data', (data: Buffer) => responseHandler.handleResponse(data); );
+                if (err) {
+                    cb(err);
+                } else {
+                    method.apply(this, args);
+                }
+            })
+        };
+    }
 
-//         this.socket.on('error', (err) => {
-//             if (this.client.debug) {
-//                 console.error("An ERROR Occurred: ", err);
-//             }
-//         });
+    init(connection: any) {
+        connection.connected = false;
+        connection.socket = new net.Socket({ allowHalfOpen: true });
 
-//         this.socket.on('close', () => {
-//             this.connected = false;
-//             this.clearAutoCloseTimeout();
-//             console.log("Connection closed.");
-//         })
-//     }
+        connection.socket.on('data', SMBClient.response(connection));
 
-//     public connect(): Promise<void> {
-//         return new Promise((resolve, reject) => {
+        connection.errorHandler = [];
 
-//             if (this.connected) {
-//                 console.log("Error: Already Connected");
-//                 resolve();
-//                 return;
-//             }
-            
-//             this.socket.connect(this.client.port, this.client.ip, () => {
-//                 this.connected = true;
-//                 console.log("Socket successfully connected");
-//                 this.setAutoCloseTimeout(); // setup auto close after connection is established
-//                 resolve();
-//             });
+        connection.socket.on('error', (err: any) => {
+            if (connection.errorHandler.length > 0) {
+                connection.errorHandler[0].call(null, err)
+            }
+            if (connection.debug) {
+                console.error("-----ERROR-----");
+                console.log(arguments);
+            }
+        });
+    }
 
-//             this.socket.once('error', (err) => { // socket error handler once for the rejection of connection
-//                 reject(err);
-//             })
-//         })
-//     }
-        
-//     public close(): void {
-//         this.clearAutoCloseTimeout();
-//         if (this.connected) {
-//             this.connected = false;
-//             this.socket.end();
-//             console.log("Connection closed programmatically");
-//         }
-//     }
+    connect(connection: any, cb: any) {
+        if (connection.connected) {
+            cb && cb(null);
+            return;
+        }
 
-//     // handle data received from server
-//     // private handleData(data: Buffer): void {
-//     //     // Process the received data
-//     //     console.log("Data received from server:", data.toString());
-//     //     // Here you would parse the SMB response and take appropriate actions
-//     //     // This could involve invoking callbacks or processing data
-        
-//     //     this.setAutoCloseTimeout(); // Reset the auto-close timeout whenever data is received
-//     // }
+        cb = this.scheduleAutoClose(connection, cb);
 
-//     private clearAutoCloseTimeout(): void {
-//         if (this.scheduledAutoClose) {
-//             clearTimeout(this.scheduledAutoClose);
-//             this.scheduledAutoClose = null;
-//         }
-//     }
+        connection.socket.connect(connection.port, connection.ip);
 
-//     private setAutoCloseTimeout(): void {
-//         this.clearAutoCloseTimeout();
-//         if (this.client.autoCloseTimeout !== 0) {
-//             this.scheduledAutoClose = setTimeout(() => {
-//                 this.close();
-//             }, this.client.autoCloseTimeout);
-//         }
-//     }
+        SMBClient.request('negotiate', {}, connection, (err) => {
+            if (err) {
+                cb && cb(err)
+            } else {
+                SMBClient.request('session_setup_step1', {}, connection, (err) => {
+                    if (err) {
+                        cb && cb(err);
+                    } else {
+                        SMBClient.request('session_setup_step2', {}, connection, (err) => {
+                            if (err) {
+                                cb && cb(err);
+                            } else {
+                                SMBClient.request('tree_connect', {}, connection, (err) => {
+                                    if (err) {
+                                        cb && cb(err);
+                                    } else {
+                                        connection.connected = true;
+                                        cb && cb(null);
+                                    }
+                                })
+                            }
+                        })
+                    }
+                })
+            }
+        })
+    }
 
-//     // Start Section: SMB Method Requests
-//     public sendFileExistsRequest(filePath: string): boolean {
-        
-//         return false;
-//     }
+    // Private Functions
+    private clearAutoCloseTimeout(connection: any) {
+        if (connection.autoCloseTimeout) {
+            clearTimeout(connection.scheduledAutoClose);
+            connection.scheduledAutoClose = null;
+        }
+    }
 
-//     public sendFileReadRequest(filePath: string): Buffer {
+    private setAutoCloseTimeout(connection: any): void {
+        this.clearAutoCloseTimeout(connection);
+        if (connection.autoCloseTimeout != 0) {
+            connection.scheduledAutoClose = setTimeout(() => {
+                connection.close();
+            }, connection.autoCloseTimeout);
+        }
+    }
 
-//         return Buffer.from("0xff");
-//     }
+    private scheduleAutoClose(connection: any, cb: any): () => any {
+        this.addErrorListener(connection, cb);
+        this.clearAutoCloseTimeout(connection);
 
-// }
+        return () => {
+            this.removeErrorListener(connection);
+            this.setAutoCloseTimeout(connection);
+            cb.apply(null, arguments);
+        };
+    }
+
+    // private error handlers
+    private addErrorListener(connection: any, callback: any): void {
+        connection.errorHandler.unshift(callback);
+    }
+
+    private removeErrorListener(connection: any): void {
+        connection.errorHandler.shift();
+    }
+}
