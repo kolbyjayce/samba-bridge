@@ -1,11 +1,12 @@
 import { SMBMessage } from "./SMBMessage"
 import message from "../utils/Message";
 import { parseFiles } from "../services/fileParser";
+import { IConnection } from "../types/Connection";
 
 const ntlm = require("ntlm");
 
 const close = message({
-    generate(connection: any, params: any) {
+    generate(connection: IConnection, params: any) {
         return new SMBMessage({
             headers: {
                 "Command": "CLOSE"
@@ -21,7 +22,7 @@ const close = message({
 });
 
 const create_folder = message({
-    generate(connection: any, params: any) {
+    generate(connection: IConnection, params: any) {
         const buffer = Buffer.alloc(params.path, 'ucs2');
 
         return new SMBMessage({
@@ -46,7 +47,7 @@ const create_folder = message({
 });
 
 const create = message({
-    generate(connection: any, params: any) {
+    generate(connection: IConnection, params: any) {
         const buffer = Buffer.alloc(params.path, 'usc2');
 
         return new SMBMessage({
@@ -71,7 +72,7 @@ const create = message({
 });
 
 const negotiate = message({
-    generate(connection: any) {
+    generate(connection: IConnection) {
         return new SMBMessage({
             headers: {
                 'Command':'NEGOTIATE'
@@ -82,7 +83,7 @@ const negotiate = message({
 });
 
 const open_folder = message({
-    generate(connection: any, params: any) {
+    generate(connection: IConnection, params: any) {
         const buffer = Buffer.alloc(params.path, 'usc2');
 
         return new SMBMessage({
@@ -106,7 +107,7 @@ const open_folder = message({
 });
 
 const open = message({
-    generate(connection: any, params: any) {
+    generate(connection: IConnection, params: any) {
         const buffer = Buffer.alloc(params.path, 'usc2');
 
         return new SMBMessage({
@@ -127,7 +128,7 @@ const open = message({
 });
 
 const query_directory = message({
-    generate(connection: any, params: any) {
+    generate(connection: IConnection, params: any) {
         return new SMBMessage({
             headers:{
                 'Command':'QUERY_DIRECTORY'
@@ -147,7 +148,7 @@ const query_directory = message({
 });
 
 const read = message({
-    generate(connection: any, file: any) {
+    generate(connection: IConnection, file: any) {
         return new SMBMessage({
             headers:{
                 'Command':'READ'
@@ -168,7 +169,7 @@ const read = message({
 });
 
 const session_setup_step1 = message({
-    generate(connection: any) {
+    generate(connection: IConnection) {
         return new SMBMessage({
             headers:{
                 'Command':'SESSION_SETUP'
@@ -184,7 +185,7 @@ const session_setup_step1 = message({
     }
     , successCode: 'STATUS_MORE_PROCESSING_REQUIRED'
 
-    , onSuccess(connection: any, response: any) {
+    , onSuccess(connection: IConnection, response: any) {
         const header = response.getHeaders();
         connection.SessionId = header.SessionId;
         connection.nonce = ntlm.decodeType2(response.getResponse().Buffer);
@@ -192,7 +193,7 @@ const session_setup_step1 = message({
 });
 
 const session_setup_step2 = message({
-    generate(connection: any) {
+    generate(connection: IConnection) {
         return new SMBMessage({
             headers:{
                 'Command':'SESSION_SETUP'
@@ -229,7 +230,7 @@ const fileInfoClasses = {
 };
 
 const set_info = message({
-    generate(connection: any, params: any) {
+    generate(connection: IConnection, params: any) {
         return new SMBMessage({
             headers: {
                 'Command':'SET_INFO'
@@ -247,7 +248,7 @@ const set_info = message({
 });
 
 const tree_connect = message({
-    generate(connection: any) {
+    generate(connection: IConnection) {
         return new SMBMessage({
             headers: {
                 'Command':'TREE_CONNECT'
@@ -255,18 +256,18 @@ const tree_connect = message({
                 , 'ProcessId':connection.ProcessId
             }
             , request: {
-                'Buffer': Buffer.alloc(connection.fullPath, 'ucs2')
+                'Buffer': Buffer.from(connection.fullPath, 'ucs2')
             }
         })     
     }
-    , onSuccess(connection: any, response: any) {
+    , onSuccess(connection: IConnection, response: any) {
         const header = response.getHeaders();
         connection.TreeId = header.TreeId;
     }
 });
 
 const write = message({
-    generate(connection: any, params: any) {
+    generate(connection: IConnection, params: any) {
         return new SMBMessage({
             headers: {
                 'Command':'WRITE'

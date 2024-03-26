@@ -1,8 +1,11 @@
 import * as net from "net";
 import { SMBClient } from "./SMBClient";
 import { SMB } from "./SMB";
+import { IConnection } from "./types/Connection";
 
 export class SMBConnection {
+    private static connectionInfo: IConnection | undefined;
+
     static close(connection: any) {
         this.clearAutoCloseTimeout(connection);
         if (connection.connected) {
@@ -15,25 +18,27 @@ export class SMBConnection {
         return () => {
             // const connection = this;
             const args = Array.prototype.slice.call(arguments);
-            this.connect(this, (err: any) => {
-                const cb = args.pop();
-                cb.scheduledAutoClose(this, cb);
-                args.push(cb);
-
-                if (err) {
-                    cb(err);
-                } else {
-                    method.apply(this, args);
-                }
-            })
+            if (this.connectionInfo) {
+                this.connect(this.connectionInfo, (err: any) => {
+                    const cb = args.pop();
+                    cb.scheduledAutoClose(this, cb);
+                    args.push(cb);
+    
+                    if (err) {
+                        cb(err);
+                    } else {
+                        method.apply(this, args);
+                    }
+                })
+            } else {
+                throw new Error("Connection Information is not yet initialized.");
+            }
         };
     }
 
-    static init(connection: SMB) {
-        connection.connected = false;
-        connection.socket = new net.Socket({ allowHalfOpen: true });
-
-        connection.socket.on('data', SMBClient.response(connection as any));
+    static init(connection: IConnection) {
+        this.connectionInfo = connection;
+        connection.socket.on('data', SMBClient.response(connection));
 
         connection.errorHandler = [];
 
@@ -48,12 +53,11 @@ export class SMBConnection {
         });
     }
 
-    static connect(connection: any, cb: any) {
+    static connect(connection: IConnection, cb: any) {
         if (connection.connected) {
             cb && cb(null);
             return;
         }
-
         cb = this.scheduleAutoClose(connection, cb);
 
         connection.socket.connect(connection.port, connection.ip);
@@ -116,8 +120,11 @@ export class SMBConnection {
 
     // private error handlers
     private static addErrorListener(connection: any, callback: any): void {
-        console.log(connection.errorHandler);
-        connection.errorHandler.unshift(callback);
+        if (connection.errorHandler) {
+            connection.errorHandler.unshift(callback);
+        } else {
+            connection.errorHandler = [ callback ]; // set first value of list
+        }
     }
 
     private static removeErrorListener(connection: any): void {

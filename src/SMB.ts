@@ -3,68 +3,44 @@ import { SMBOptions } from "./types/SMBOptions";
 import { SMBConnection } from "./SMBConnection";
 import { Socket } from "net";
 import { SMBClient } from "./SMBClient";
+import { IConnection } from "./types/Connection";
 
 export class SMB {
   // const client variables
-  private shareRegEx = /\\\\([^\\]*)\\([^\\]*)\\?/;
-  private messageId: number;
-  private share: string;
-  private fullPath: string;
-  private packetConcurrency: number;
-  private sessionId: number;
-//   private pidHigh: number;
-//   private pidLow: number;
-  private ProcessId: Buffer;
-  
-  // public variables needed by SMBConnection
-  public autoCloseTimeout: number;
-  public debug: boolean;
-  public ip: string;
-  public port: number;
-  public connected: boolean = false;
-  public socket: Socket | undefined;
-  public errorHandler: Array<any> = [];
-
-  // auth information
-  private domain: string;
-  private username: string;
-  private password: string;
+    private shareRegEx = /\\\\([^\\]*)\\([^\\]*)\\?/;
+    private connectionParams: IConnection; // hold all connection information
 
     constructor(private options: SMBOptions) {
         const match = options.host.match(this.shareRegEx);
-        if (!match) {
-        // invalid share provided
-        throw new Error("Invalid Share was provided");
-        } else {
-        // assign class variables
-        this.ip = match[1];
-        this.share = match[2];
+        if (!match) throw new Error("Invalid Share was provided");
+            // assign class variables
+        const params: IConnection = {
+            ip: match[1],
+            share: match[2],
+            port: options.port ? options.port : 445,
+            messageId: 0,
+            fullPath: options.host,
+            packetConcurrency: options.packetConcurrency ? options.packetConcurrency : 20,
+            autoCloseTimeout: options.autoCloseTimeout ? options.autoCloseTimeout : 10000, // default to 10 seconds
+            username: options.username,
+            password: options.password,
+            domain: options.domain,
+            SessionId: Math.floor(Math.random() * 256) & 0xFF,
+            ProcessId: PIDGenerator.generatePID(),
+            debug: options.debug ? options.debug : false,
+            connected: false,
+            errorHandler: [],
+            responsesCB: {}, // used in SMBClient.request
+            responses: {}, // used in SMBClient.request
+            socket: new Socket({ allowHalfOpen: true })
         }
-
-        this.port = options.port ? options.port : 445; // default smb port
-        this.messageId = 0;
-        this.fullPath = options.host;
-        this.packetConcurrency = options.packetConcurrency
-        ? options.packetConcurrency
-        : 20;
-        this.autoCloseTimeout = options.autoCloseTimeout
-        ? options.autoCloseTimeout
-        : 10000; // default timeout to 10 seconds
-
-        this.username = options.username;
-        this.password = options.password;
-        this.domain = options.domain;
-        this.sessionId = Math.floor(Math.random() * 256) & 0xFF;
-
         // const pidGenerator = new PIDGenerator();
         // const { PIDHigh, PIDLow } = pidGenerator.generatePID(); // SMB header takes both high and low pid in different sections
         // this.pidHigh = PIDHigh;
         // this.pidLow = PIDLow;
-        this.ProcessId = PIDGenerator.generatePID();
 
-        this.debug = options.debug ? options.debug : false;
-
-        SMBConnection.init(this);
+        this.connectionParams = params;
+        SMBConnection.init(this.connectionParams);
     }
 
     close(): void {
@@ -72,10 +48,10 @@ export class SMB {
     }
 
     exists = SMBConnection.requireConnect((path: string, cb: any) => {
-        SMBClient.request('open', { path: path }, this, (err, file) => {
+        SMBClient.request('open', { path: path }, this.connectionParams, (err, file) => {
             if (err) {
                 cb && cb(null, false);
-            } else SMBClient.request('close', file, this, (err) => {
+            } else SMBClient.request('close', file, this.connectionParams, (err) => {
                 cb && cb(null);
             })
         })
