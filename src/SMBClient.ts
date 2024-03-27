@@ -6,14 +6,17 @@ import { IConnection } from "./types/Connection";
   
 export class SMBClient {
     static request(messageName: keyof typeof messages, params: any, connection: IConnection, cb: (message?: SMBMessage, error?: Error) => void) {
-        const msg = messages[messageName];
-        const smbMessage = msg.generate(connection, params);
-    
-        // Send the SMB message
-        this.sendNetBiosMessage(connection, smbMessage);
-    
-        // Wait for and handle the response
-        this.getResponse(connection, smbMessage.getHeaders().MessageId, msg.parse(connection, cb));
+        const smbMessage = messages[messageName](connection, params);
+
+        if (smbMessage) {
+            // Send the SMB message
+            this.sendNetBiosMessage(connection, smbMessage);
+        
+            // Wait for and handle the response
+            this.getResponse(connection, smbMessage.getHeaders().MessageId, smbMessage.parse(connection, cb));
+        } else {
+            throw new Error(`Problem occurred while location message type: ${messageName}`);
+        }
     }
 
     static response(connection: IConnection) {

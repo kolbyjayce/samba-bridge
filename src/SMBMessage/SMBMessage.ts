@@ -1,10 +1,10 @@
 import { Buffer } from "buffer";
-import { Socket } from "net";
 
 import { structures } from "../utils/Structures";
 
 import { IStructure, IStructureOptions } from "../types/Structures";
 import { ICommandTranslations, IHeaderTranslations } from "../types/SMBMessage";
+import { MessageDefaults } from "../utils/Message";
 
 type HeaderEntry = [string, number] | [string, number, any];
 
@@ -22,7 +22,7 @@ interface IResponse {
 }
 
 const protocolId = Buffer.from([
-  0xFE, 
+  0xFE,
   'S'.charCodeAt(0), 
   'M'.charCodeAt(0), 
   'B'.charCodeAt(0)
@@ -62,7 +62,7 @@ const flags = {
     , 'REPLAY_OPERATION': 0x20000000
 }
 
-export class SMBMessage {
+export class SMBMessage extends MessageDefaults {
     private headers: IHeader = {};
     private response: IResponse = {}; 
     private request: IRequest = {};
@@ -74,12 +74,27 @@ export class SMBMessage {
     private isAsync: boolean = false;
 
     constructor(private options: any = {}) {
+        super();
         if (options.headers) {
-            this.setHeaders(options.header);
+            this.setHeaders(options.headers);
         }
 
         if (options.request) {
             this.setRequest(options.request);
+        }
+
+        // overridable functions from Message Defaults
+        if (options.parse) {
+            this.parse = options.parse;
+        }
+        if (options.parseResponse) {
+            this.parseResponse = options.parseResponse;
+        }
+        if (options.onSuccess) {
+            this.onSuccess = options.onSuccess
+        }
+        if (options.successCode) {
+            this.successCode = options.successCode;
         }
     }
 
@@ -129,7 +144,7 @@ export class SMBMessage {
     // private methods
 
 
-    private dataToBuffer(data: any, length: number): Buffer {
+    private dataToBuffer(data: Buffer | string | number, length: number): Buffer {
         if (Buffer.isBuffer(data)) { // already a buffer
           return data;
         }
@@ -154,7 +169,7 @@ export class SMBMessage {
     }
     
     private writeData(buffer: Buffer, data: any, offset: number, length: number): void {
-        this.dataToBuffer(data, length).copy(buffer, offset);
+        this.dataToBuffer(data, length).copy(buffer, offset, 0);
     }
     
     private readData(buffer: Buffer, offset: number, length: number): Buffer {
@@ -231,43 +246,37 @@ export class SMBMessage {
         });
     }
 
-    private writeRequest(buffer: Buffer, initialOffset: number): number {
-        let offset = initialOffset;
+    private writeRequest(buffer: Buffer, offset: number): number {
+        let initialOffset = offset;
         let needsRewrite = false;
         const tmpBuffer = Buffer.alloc(buffer.length);
-    
-        (this.structure.request as [string, number | string, any][]).forEach(([key, lengthOrRef, defaultValue = 0]) => {
-            let length: number;
-            let value: any;
-    
-            if (typeof lengthOrRef === 'string') {
-                // If length is a reference to another field, resolve it
+        offset = 0;
+        
+        for (const i in this.structure.request) {
+            const key: string = this.structure.request[i][0];
+            let length: number | string = this.structure.request[i][1] || 1;
+            const defaultValue: number | Buffer = this.structure.request[i][2] || 0;
+
+            if (typeof length === 'string') {
                 this.request[key] = this.request[key] || '';
-                if (this.request[lengthOrRef] !== this.request[key].length) {
-                    this.request[lengthOrRef] = this.request[key].length;
+                if (this.request[length] != this.request[key].length) {
+                    this.request[length] = this.request[key].length;
                     needsRewrite = true;
                 }
-                length = this.request[key].length;
+                length = parseInt(this.request[key].length);
             } else {
-                // If length is a number, use it directly
-                length = lengthOrRef || 1;
-                this.request[key] = this.request[key] ?? defaultValue;
+                this.request[key] = this.request[key] || defaultValue;
             }
-    
-            // Determine the value to write
-            value = this.request[key];
-            // Write the data to tmpBuffer at the current offset
-            this.writeData(tmpBuffer, value, offset, length);
+
+            this.writeData(tmpBuffer, this.request[key], offset, length);
+
             offset += length;
-        });
-    
+        }
         if (needsRewrite) {
             this.writeRequest(tmpBuffer, 0);
-        } else {
-            // Copy from tmpBuffer to the original buffer
-            tmpBuffer.copy(buffer, initialOffset, 0, offset);
         }
-    
+        tmpBuffer.copy(buffer, initialOffset, 0, offset);
+
         return offset;
     }
 

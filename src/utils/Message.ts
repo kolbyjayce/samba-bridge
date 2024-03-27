@@ -1,9 +1,9 @@
 import { getStatus, getErrorMessage } from "./ErrorReference";
 import { BigInt } from "./BigInt";
 
-class MessageDefaults {
+export class MessageDefaults {
     successCode = 'STATUS_SUCCESS';
-    
+
     parse(connection: any, cb?: any) {
         return (response: any) => {
             const header = response.getHeaders();
@@ -29,14 +29,3 @@ class MessageDefaults {
 
     onSuccess?(connection: any, response: any): void;
 }
-
-const message = (obj: any) => {
-    const defaults = new MessageDefaults();
-
-    Object.keys(defaults).forEach(key => {
-        obj[key] = obj[key] || (defaults as any)[key];
-    });
-    return obj;
-}
-
-export default message;
