@@ -1,6 +1,7 @@
 import { SMBMessage } from "./SMBMessage"
 import { parseFiles } from "../services/fileParser";
 import { IConnection } from "../types/Connection";
+import { decodeType2, encodeType3 } from "../services/encryption";
 
 const ntlm = require("ntlm");
 
@@ -164,7 +165,8 @@ const session_setup_step1 = (connection: IConnection, params?: any) => {
         , onSuccess(connection: IConnection, response: any) {
             const header = response.getHeaders();
             connection.SessionId = header.SessionId;
-            connection.nonce = ntlm.decodeType2(response.getResponse().Buffer);
+
+            connection.nonce = decodeType2(response.getResponse().Buffer);
         }
     })
 };
@@ -177,7 +179,7 @@ const session_setup_step2 = (connection: IConnection, params: any) => {
             , 'ProcessId':connection.ProcessId
         }
         , request:{
-            'Buffer':ntlm.encodeType3(
+            'Buffer': ntlm.encodeType3(
                 connection.username
                 , connection.ip
                 , connection.domain
