@@ -9,6 +9,7 @@ export class SMB {
   // const client variables
     private shareRegEx = /\\\\([^\\]*)\\([^\\]*)\\?/;
     private connectionParams: IConnection; // hold all connection information
+    private connection: SMBConnection;
 
     constructor(private options: SMBOptions) {
         const match = options.host.match(this.shareRegEx);
@@ -40,20 +41,25 @@ export class SMB {
         // this.pidLow = PIDLow;
 
         this.connectionParams = params;
-        SMBConnection.init(this.connectionParams);
+        this.connection = new SMBConnection(this.connectionParams);
+        // SMBConnection.init(this.connectionParams);
     }
 
-    close(): void {
-        SMBConnection.close(this);
+    public close(): void {
+        this.connection.close();
     }
 
-    exists = SMBConnection.requireConnect((path: string, cb: any) => {
-        SMBClient.request('open', { path: path }, this.connectionParams, (err, file) => {
-            if (err) {
-                cb && cb(null, false);
-            } else SMBClient.request('close', file, this.connectionParams, (err) => {
-                cb && cb(null);
-            })
-        })
-    })
+    public async exists(path: string): Promise<boolean> {
+        try {
+            await this.connection.requireConnect();
+            console.log("CONNECTION ESTABLISHED")
+            const file = await SMBClient.request('open', {path: path}, this.connectionParams);
+            await SMBClient.request('close', file, this.connectionParams);
+            return true;
+        } catch (err) {
+            console.error(err);
+            this.close();
+            return false; // an error occurred so assume file doesn't exist
+        }
+    }
 }

@@ -1,20 +1,25 @@
 # samba-bridge
 
-SMB connections that allows file system operations cross platform in NodeJS
+**If Node version >= 16 then it is required to enable openssl legacy options**
 
-### Use
+This is due to using md4 encryptions algorithms for ntlmssp encryption algorithms for server authentication.
 
-Initialize a new connection
+Linux/Mac
+`export NODE_OPTIONS=--openssl-legacy-provider`
 
-`const smb = new SMBClient(SMBOptions)`
+Windows CMD
+`set NODE_OPTIONS=--openssl-legacy-provider`
 
-SMB Options have 3 required fields
+Windows Powershell
+`$env:NODE_OPTIONS="--openssl-legacy-provider"`
 
-```
-host: string,
-username: string,
-password: string
-```
+***These will only set this option for the current shell for a more permanent add to shell options like below***
 
-After initialized, a you must create a connection. This connection will return a promise that must resolve before any file operations can occur
-`await smb.connect()`
+Using Bash
+`echo 'export NODE_OPTIONS=--openssl-legacy-provider' >> ~/.bash_profile`
+
+Using zsh (newer MacOS)
+`echo 'export NODE_OPTIONS=--openssl-legacy-provider' >> ~/.zshrc`
+
+Windows CMD (as admin)
+`setx NODE_OPTIONS --openssl-legacy-provider /m`

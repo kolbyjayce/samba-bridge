@@ -5,75 +5,100 @@ import { SMB } from "./SMB";
 import { IConnection } from "./types/Connection";
   
 export class SMBClient {
-    static request(messageName: keyof typeof messages, params: any, connection: IConnection, cb: (message?: SMBMessage, error?: Error) => void) {
+    static async request(messageName: keyof typeof messages, params: any, connection: IConnection): Promise<SMBMessage> {
         const smbMessage = messages[messageName](connection, params);
 
-        if (smbMessage) {
-            // Send the SMB message
-            this.sendNetBiosMessage(connection, smbMessage);
-        
-            // Wait for and handle the response
-            this.getResponse(connection, smbMessage.getHeaders().MessageId, smbMessage.parse(connection, cb));
-        } else {
-            throw new Error(`Problem occurred while location message type: ${messageName}`);
+        if (!smbMessage) {
+            throw new Error(`Problem occurred while locating message type: ${messageName}`);
         }
+    
+        // Send the SMB message
+        await this.sendNetBiosMessage(connection, smbMessage);
+    
+        // Wait for and handle the response
+        const response = await this.getResponse(connection, smbMessage.getHeaders().MessageId);
+
+        return await smbMessage.parse(connection, response);
     }
 
-    static response(connection: IConnection) {
-        // connection.responses = {};
-        connection.responsesCB = {};
-        connection.responseBuffer = Buffer.alloc(0);
-    
-        return (response: Buffer) => {
-            // Concatenate new response with the existing buffer
-            connection.responseBuffer = Buffer.concat([connection.responseBuffer as Buffer, response]);
-        
-            // Extract complete messages
-            let extract = true;
-            while (extract) {
-                extract = false;
-        
-                // Check if the buffer has at least the header size (4 bytes for NetBIOS)
-                if (connection.responseBuffer.length >= 4) {
-                    // Message length is in the NetBIOS header; 1 byte for type + 3 bytes for length
-                    const msgLength = (connection.responseBuffer.readUInt8(1) << 16) + connection.responseBuffer.readUInt16BE(2);
-            
-                    // Check if the complete message is received (message length + 4 bytes header)
-                    if (connection.responseBuffer.length >= msgLength + 4) {
-                        extract = true;
-            
-                        // Parse the SMB2 message from the buffer
-                        const messageBuffer = connection.responseBuffer.slice(4, msgLength + 4);
-                        const message = new SMBMessage();
-                        message.parseBuffer(messageBuffer);
-            
-                        // Optionally log the response
-                        if (connection.debug) {
-                            console.log('-----RESPONSE-----');
-                            console.log(messageBuffer.toString('hex'));
-                        }
-            
-                        // Get the message ID as a hex string
-                        const mId = message.getHeaders().MessageId.toString('hex');
-            
-                        // Dispatch the message if a callback is waiting, or store it
-                        if (connection.responsesCB && mId in connection.responsesCB) {
-                            connection.responsesCB[mId](message);
-                            delete connection.responsesCB[mId];
-                        } else {
-                            connection.responses[mId] = message;
-                        }
-            
-                        // Remove the processed message from the response buffer
-                        connection.responseBuffer = connection.responseBuffer.slice(msgLength + 4);
+    static response(connection: IConnection, response: Buffer): void {
+        if (!connection.responseBuffer) throw new Error("Buffer not allocated for the response.");
+        connection.responseBuffer = Buffer.concat([connection.responseBuffer, response]);
+
+        let extract = true;
+        while (extract) {
+            extract = false;
+            if (connection.responseBuffer.length >= 4) {
+                const msgLength = (connection.responseBuffer.readUInt8(1) << 16) + connection.responseBuffer.readUInt16BE(2);
+
+                if (connection.responseBuffer.length >= 4) { // keep extracting
+                    extract = true;
+                    const res = connection.responseBuffer.subarray(4, msgLength + 4);
+                    const message = new SMBMessage();
+
+                    message.parseBuffer(res);
+
+                    if (connection.debug) {
+                        console.log("-----RESPONSE-----");
+                        console.log(res.toString('hex'));
                     }
+
+                    const mId = message.getHeaders().MessageId.toString('hex');
+
+                    // if getResponse ran first, call the callback function with the message
+
+                    if (connection.responsesCB[mId]) {
+                        connection.responsesCB[mId](message);
+                        delete connection.responsesCB[mId];
+                    } else { // add message to responses object until getResponse runs
+                        connection.responses[mId] = message;
+                    }
+
+                    connection.responseBuffer = connection.responseBuffer?.subarray(msgLength + 4);
                 }
             }
-        };
+        }
+    }
+    
+    // Private functions
+    private static getResponse(connection: IConnection, mId: number): Promise<any> {
+        return new Promise((resolve, reject) => {
+            const messageId = Buffer.alloc(4);
+            messageId.writeUInt32LE(mId, 0);
+
+            const messageIdString = messageId.toString('hex');
+    
+            // check if response already received, otherwise wait for it
+            if (messageIdString in connection.responses) {
+                resolve(connection.responses[messageIdString]);
+                delete connection.responses[messageIdString];
+            } else {
+                // Store resolve function to be called once the response is received
+                console.log("Waiting for response for messageId:", messageIdString);
+                connection.responsesCB[messageIdString] = (response: IConnection) => {
+                    console.log("Received response for messageId:", messageIdString);
+                    resolve(response);
+                    delete connection.responsesCB[messageIdString]; // Clean up callback after execution
+                };
+
+                // Timeout to reject promise after 30 seconds
+                const timeout = setTimeout(() => {
+                    console.log("Timeout waiting for response for messageId:", messageIdString);
+                    reject(new Error('Response timeout'));
+                    delete connection.responsesCB[messageIdString];
+                }, 30000);
+
+                // cleanup timeout if response is received before timeout
+                const originalCallback = connection.responsesCB[messageIdString];
+                connection.responsesCB[messageIdString] = (response) => {
+                    clearTimeout(timeout);
+                    originalCallback(response);
+                };            
+            }
+        })
     }
 
-    // Private functions
-    private static sendNetBiosMessage(connection: IConnection, message: SMBMessage): boolean {
+    private static async sendNetBiosMessage(connection: IConnection, message: SMBMessage): Promise<boolean> {
         const smbRequest = message.getBuffer(connection);
 
         if (connection.debug) {
@@ -93,27 +118,19 @@ export class SMBClient {
         // write message
         smbRequest.copy(buffer, 4, 0, smbRequest.length);
 
-        // Send message through socket
-        connection.newResponse = false;
-        if (connection.socket) {
-            connection.socket.write(buffer);
-        } else {
-            throw new Error("Socket is not initialized.");
-        }
+        return new Promise((resolve, reject) => {
+            if (!connection.socket) {
+                reject(new Error("Socket is not initialized."));
+                return;
+            }
 
-        return true;
-    }
-
-    private static getResponse(connection: IConnection, mId: number, cb: any) {
-        const messageId = Buffer.alloc(4);
-        messageId.writeUInt32LE(mId, 0);
-        const messageIdString = messageId.toString('hex');
-
-        if (messageIdString in connection.responses) {
-            cb(connection.responses[messageIdString]);
-            delete connection.responses[messageIdString];
-        } else {
-            connection.responsesCB[messageIdString] = cb;
-        }
+            connection.socket.write(buffer, (err) => {
+                if (err) {
+                    reject(err);
+                } else {
+                    resolve(true);
+                }
+            })
+        });
     }
 }

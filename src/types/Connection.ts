@@ -23,7 +23,7 @@ export interface IConnection {
     TreeId?: any;
     nonce?: any;
     newResponse?: boolean;
-
+    scheduledAutoClose?: any; // will be a function
 }
 
 interface ResponseCallbacks {

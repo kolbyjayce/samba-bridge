@@ -1,26 +1,27 @@
 import { getStatus, getErrorMessage } from "./ErrorReference";
 import { BigInt } from "./BigInt";
+import { IConnection } from "../types/Connection";
+import { SMBMessage } from "../SMBMessage/SMBMessage";
 
 export class MessageDefaults {
     successCode = 'STATUS_SUCCESS';
 
-    parse(connection: any, cb?: any) {
-        return (response: any) => {
-            const header = response.getHeaders();
-            const err = getStatus(BigInt.fromBuffer(header.status).toNumber());
+    public parse(connection: IConnection, message: SMBMessage): Promise<any> {
+        return new Promise((resolve, reject) => {
+            const header = message.getHeaders();
 
+            const err = getStatus(BigInt.fromBuffer(header.Status).toNumber());
+    
             if (err.code === this.successCode) {
                 if (this.onSuccess) {
-                    this.onSuccess(connection, response);
+                    this.onSuccess(connection, message);
                 }
-                if (cb) {
-                    cb(null, this.parseResponse(response));
-                }
+                resolve(this.parseResponse(message));
             } else {
                 const error = new Error(getErrorMessage(err));
-                if (cb) cb(error);                
+                reject(error);
             }
-        }
+        })
     }
 
     parseResponse(response: any) {

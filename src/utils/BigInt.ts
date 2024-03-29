@@ -9,7 +9,7 @@ export class BigInt {
   constructor(n: number | BigInt, v?: number) {
     if (BigInt.isBigInt(n)) {
       this.buffer = Buffer.alloc(n.buffer.length);
-      n.buffer.copy(this.buffer);
+      n.buffer.copy(this.buffer, 0);
       this.sign = n.sign;
     } else {
       this.buffer = Buffer.alloc(n);

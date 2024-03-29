@@ -73,7 +73,7 @@ export class SMBMessage extends MessageDefaults {
     private isMessageIdSet: boolean = false;
     private isAsync: boolean = false;
 
-    constructor(private options: any = {}) {
+    constructor(options: any = {}) {
         super();
         if (options.headers) {
             this.setHeaders(options.headers);
@@ -173,7 +173,7 @@ export class SMBMessage extends MessageDefaults {
     }
     
     private readData(buffer: Buffer, offset: number, length: number): Buffer {
-        return buffer.slice(offset, offset + length);
+        return buffer.subarray(offset, offset + length);
     }
     
     private translate(key: keyof IHeaderTranslations, value: any): any {
@@ -208,7 +208,8 @@ export class SMBMessage extends MessageDefaults {
             this.headers[key] = this.readData(buffer, offset, length);
 
             if (length <= 8) {
-                this.headers[key] = this.unTranslate(this.bufferToData(this.headers[key] as Buffer)) || this.headers[key];
+                // get header translation for command or set header[key] = Buffer
+                this.headers[key] = key === "Command" ? this.unTranslate(this.bufferToData(this.headers[key] as Buffer)) : this.headers[key];
             }
             offset += length
         }
@@ -239,11 +240,14 @@ export class SMBMessage extends MessageDefaults {
     }
 
     private readResponse(buffer: Buffer, offset: number): void {
-        Object.entries(this.structure.response).forEach(([name, lengthOrRef]: [string, any]) => {
-            let length = typeof lengthOrRef === 'string' ? this.bufferToData(this.response[lengthOrRef as string]) as number : lengthOrRef || 1;
-            this.response[name] = this.readData(buffer, offset, length);
+        for (const i in this.structure.response) {
+            const key: string = this.structure.response[i][0];
+            let length: string | number = this.structure.response[i][1] || 1;
+
+            if (typeof length === "string") length = this.bufferToData(this.response[length]); // convert strings to integers
+            this.response[key] = this.readData(buffer, offset, length);
             offset += length;
-        });
+        }
     }
 
     private writeRequest(buffer: Buffer, offset: number): number {
