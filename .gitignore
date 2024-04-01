@@ -131,4 +131,4 @@ dist
 .pnp.*
 
 # testing demo folder
-demo/
+demo/*

@@ -14,106 +14,147 @@
  * Copyright (C) 2012  Joshua M. Clulow <josh@sysmgr.org>
  */
 
-import { lmhashbuf, nthashbuf } from "./hashing";
+// import { lmhashbuf, nthashbuf } from "./hashing";
 import crypto from "crypto";
-import { oddpar, expandkey } from "./commonNTLM";
+import * as os from "os";
+import { createLMv2Response, createNTLMHash, createPseudoRandomValue } from "./hashing";
 
-const decodeType2 = (buffer: Buffer) => {
-    const temp = buffer.toString('ascii', 0, 7);
-
-    if (buffer[7] !== 0x00 || temp !== 'NTLMSSP') throw new Error("Error with decoding buffer.");
-
-    const type = buffer.readUInt8(8);
-
-    if (type !== 0x02) throw new Error("Message not NTLMSSP Challenge (0x02)");
-
-    const nonce = buffer.subarray(24, 32);
-    return nonce;
-}
-
-const encodeType3 = (username: string, hostname: string, ntdomain: string, nonce: Buffer, password: string): Buffer => {
+const encodeType1 = (hostname: string, domain: string) => {
     hostname = hostname.toUpperCase();
-    ntdomain = ntdomain.toUpperCase();
+    domain = domain.toUpperCase();
+
+    const hostnameLength = Buffer.byteLength(hostname, 'ascii');
+    const domainLength = Buffer.byteLength(domain, 'ascii');
+
+    let pos = 0;
+    const buf = Buffer.alloc(32 + hostnameLength + domainLength);
+
+    buf.write('NTLMSSP', pos, 7, 'ascii');
+    pos += 7;
+
+    buf.writeUInt8(0, pos);
+    pos++;
   
-    let lmh = Buffer.alloc(21);
-    lmhashbuf(password).copy(lmh);
-    lmh.fill(0x00, 16); // null pad to 21 bytes
-    let nth = Buffer.alloc(21);
-    nthashbuf(password).copy(nth);
-    nth.fill(0x00, 16); // null pad to 21 bytes
+    buf.writeUInt8(0x01, pos); // byte type;
+    pos++;
   
-    let lmr = makeResponse(lmh, nonce);
-    let ntr = makeResponse(nth, nonce);
+    buf.fill(0x00, pos, pos + 3); // byte zero[3];
+    pos += 3;
   
-    let usernamelen = Buffer.byteLength(username, 'ucs2');
-    let hostnamelen = Buffer.byteLength(hostname, 'ucs2');
-    let ntdomainlen = Buffer.byteLength(ntdomain, 'ucs2');
-    let lmrlen = 0x18;
-    let ntrlen = 0x18;
+    buf.writeUInt16LE(0xb203, pos); // short flags;
+    pos += 2;
   
-    let ntdomainoff = 0x40;
-    let usernameoff = ntdomainoff + ntdomainlen;
-    let hostnameoff = usernameoff + usernamelen;
-    let lmroff = hostnameoff + hostnamelen;
-    let ntroff = lmroff + lmrlen;
+    buf.fill(0x00, pos, pos + 2); // byte zero[2];
+    pos += 2;
   
-    let msg_len = 64 + ntdomainlen + usernamelen + hostnamelen + lmrlen + ntrlen;
-    let buf = Buffer.alloc(msg_len);
+    buf.writeUInt16LE(domainLength, pos); // short dom_len;
+    pos += 2;
+    
+    buf.writeUInt16LE(domainLength, pos); // short dom_len;
+    pos += 2;
+
+    const domainOff = 0x20 + hostnameLength;
+    buf.writeUInt16LE(domainOff, pos); // short dom_off;
+    pos += 2;
+
+    buf.fill(0x00, pos, pos + 2); // byte zero[2];
+    pos += 2;
   
-    buf.write('NTLMSSP', 0, 7, 'ascii'); // byte protocol[8];
-    buf[7] = 0;
+    buf.writeUInt16LE(hostnameLength, pos); // short host_len;
+    pos += 2;
+    buf.writeUInt16LE(hostnameLength, pos); // short host_len;
+    pos += 2;
   
-    buf[8] = 0x03; // byte type;
+    buf.writeUInt16LE(0x20, pos); // short host_off;
+    pos += 2;
   
-    buf.fill(0x00, 9, 12); // byte zero[3];
+    buf.fill(0x00, pos, pos + 2); // byte zero[2];
+    pos += 2;
   
-    buf.writeUInt16LE(lmrlen, 12); // short lm_resp_len;
-    buf.writeUInt16LE(lmrlen, 14); // short lm_resp_len;
-    buf.writeUInt16LE(lmroff, 16); // short lm_resp_off;
-  
-    buf.writeUInt16LE(ntrlen, 20); // short nt_resp_len;
-    buf.writeUInt16LE(ntrlen, 22); // short nt_resp_len;
-    buf.writeUInt16LE(ntroff, 24); // short nt_resp_off;
-  
-    buf.writeUInt16LE(ntdomainlen, 28); // short dom_len;
-    buf.writeUInt16LE(ntdomainlen, 30); // short dom_len;
-    buf.writeUInt16LE(ntdomainoff, 32); // short dom_off;
-  
-    buf.writeUInt16LE(usernamelen, 36); // short user_len;
-    buf.writeUInt16LE(usernamelen, 38); // short user_len;
-    buf.writeUInt16LE(usernameoff, 40); // short user_off;
-  
-    buf.writeUInt16LE(hostnamelen, 44); // short host_len;
-    buf.writeUInt16LE(hostnamelen, 46); // short host_len;
-    buf.writeUInt16LE(hostnameoff, 48); // short host_off;
-  
-    buf.writeUInt16LE(msg_len, 52); // short msg_len;
-  
-    buf.writeUInt16LE(0x8201, 56); // short flags;
-  
-    buf.write(ntdomain, ntdomainoff, 'ucs2');
-    buf.write(username, usernameoff, 'ucs2');
-    buf.write(hostname, hostnameoff, 'ucs2');
-    lmr.copy(buf, lmroff);
-    ntr.copy(buf, ntroff);
+    buf.write(hostname, 0x20, hostnameLength, 'ascii');
+    buf.write(domain, domainOff, domainLength, 'ascii');
   
     return buf;
 }
 
-function makeResponse(hash: Buffer, nonce: Buffer): Buffer {
-    let out = Buffer.alloc(24);
-    for (let i = 0; i < 3; i++) {
-      const keybuf = oddpar(expandkey(hash.slice(i * 7, i * 7 + 7)));
-      // For DES-ECB, the IV parameter is not used but must be null or an empty buffer for createCipheriv
-      const des = crypto.createCipheriv('DES-ECB', keybuf, Buffer.alloc(0));
-      
-      // Use the update method with Buffer directly without specifying encodings
-      const str = des.update(nonce);
-      
-      // Copy the resulting buffer directly into the output buffer at the correct position
-      str.copy(out, i * 8);
-    }
-    return out;
+// function encodeType3(username: string, password: string, hostname: string, ntdomain: string, challenge: Buffer, workstation: string): Buffer {
+//     let dataPos = 52;
+//     const buf = Buffer.alloc(1024);
+
+//     if (!workstation) {
+//         workstation = os.hostname();
+//     }
+
+//     const signature = "NTLMSSP\0"
+//     buf.write(signature, 0, signature.length, 'ascii');
+
+//     buf.writeUInt32LE(3, 8); // set message type
+
+//     dataPos = 64;
+
+//     let ntlmHash = createNTLMHash(password),
+//         nonce = createPseudoRandomValue(16),
+//         lmv2 = createLMv2Response(challenge, username, ntlmHash, nonce, target),
+//         ntlmv2 = hash.createNTLMv2Response(type2Message, username, ntlmHash, nonce, target);
+
+//     //lmv2 security buffer
+//     buf.writeUInt16LE(lmv2.length, 12);
+//     buf.writeUInt16LE(lmv2.length, 14);
+//     buf.writeUInt32LE(dataPos, 16);
+
+//     lmv2.copy(buf, dataPos);
+//     dataPos += lmv2.length;
+    
+//     //ntlmv2 security buffer
+//     buf.writeUInt16LE(ntlmv2.length, 20);
+//     buf.writeUInt16LE(ntlmv2.length, 22);
+//     buf.writeUInt32LE(dataPos, 24);
+
+//     ntlmv2.copy(buf, dataPos);
+//     dataPos += ntlmv2.length;
+// }
+
+export { encodeType1 }
+
+/** HELPER FUNCTIONS */
+
+function createHmacMd5(key: Buffer, data: Buffer): Buffer {
+    return crypto.createHmac('md5', key).update(data).digest();
 }
 
-export { decodeType2, encodeType3 }
+function ntHash(input: string): Buffer {
+    return crypto.createHash('md4').update(Buffer.from(input, 'utf16le')).digest();
+}
+
+function ntowfv2(password: string, username: string, domain: string): Buffer {
+    const userDomain = Buffer.from(username.toUpperCase() + domain, 'utf16le');
+    return createHmacMd5(ntHash(password), userDomain);
+}
+
+function generateNTLMv2Blob(serverChallenge: Buffer, clientChallenge: Buffer, domain: string, username: string): Buffer {
+    const timestamp = getCurrentTimeForNTLM();
+    // Assuming Blob starts with a signature, a reserved field, timestamp, challenges, and ends with domain name information
+    // Signature: 0x01010000, Reserved: 0x00000000, Timestamp, Challenge, Domain
+    // This part is highly simplified and needs to include all parts of the blob as per NTLMv2 specifications
+    const blobSignature = Buffer.from('01010000', 'hex');
+    const reserved = Buffer.alloc(4, 0);
+    const domainNameBuffer = Buffer.from(domain.toUpperCase(), 'utf16le');
+    const blob = Buffer.concat([blobSignature, reserved, timestamp, clientChallenge, reserved, domainNameBuffer]); // Simplified
+    return blob;
+}
+
+function generateNTLMv2Response(serverChallenge: Buffer, password: string, username: string, domain: string): Buffer {
+    const v2Hash = ntowfv2(password, username, domain);
+    const clientChallenge = crypto.randomBytes(8);
+    const blob = generateNTLMv2Blob(serverChallenge, clientChallenge, domain, username);
+    return createHmacMd5(v2Hash, Buffer.concat([serverChallenge, blob]));
+}
+
+function getCurrentTimeForNTLM(): Buffer {
+    const ntEpoch = BigInt(Date.UTC(1601, 0, 1));
+    const unixEpoch = BigInt(Date.UTC(1970, 0, 1));
+    const time = (BigInt(Date.now()) + (unixEpoch - ntEpoch)) * BigInt(10000);
+    const buffer = Buffer.alloc(8);
+    buffer.writeBigUInt64LE(time);
+    return buffer;
+}

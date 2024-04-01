@@ -30,10 +30,10 @@ export class SMBConnection {
     }
     
     public close() {
+        this.connectionInfo.socket.end();
         this.clearAutoCloseTimeout();
         if (this.connectionInfo.connected) {
             this.connectionInfo.connected = false;
-            this.connectionInfo.socket.end();
         };
     }
 

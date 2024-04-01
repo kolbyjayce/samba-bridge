@@ -10,6 +10,7 @@ export interface IConnection {
     autoCloseTimeout: number;
     username: string;
     password: string;
+    workstation: string;
     domain: string;
     SessionId: number;
     ProcessId: Buffer;
@@ -24,6 +25,7 @@ export interface IConnection {
     nonce?: any;
     newResponse?: boolean;
     scheduledAutoClose?: any; // will be a function
+    ServerChallenge?: any;
 }
 
 interface ResponseCallbacks {

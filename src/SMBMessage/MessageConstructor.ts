@@ -1,9 +1,8 @@
 import { SMBMessage } from "./SMBMessage"
 import { parseFiles } from "../services/fileParser";
 import { IConnection } from "../types/Connection";
-import { decodeType2, encodeType3 } from "../services/encryption";
+import { encodeType1 } from "../services/encryption";
 
-const ntlm = require("ntlm");
 
 const close = (connection: IConnection, params: any) => {
     new SMBMessage({
@@ -156,17 +155,25 @@ const session_setup_step1 = (connection: IConnection, params?: any) => {
             ,'ProcessId':connection.ProcessId
         }
         , request:{
-            'Buffer':ntlm.encodeType1(
+            'Buffer': encodeType1(
                 connection.ip
                 ,connection.domain
             )
         }
         , successCode: 'STATUS_MORE_PROCESSING_REQUIRED'
         , onSuccess(connection: IConnection, response: any) {
+            console.log("TYPE", typeof response.getResponse().Buffer);
             const header = response.getHeaders();
+            
+            const identifier = response.getResponse().NTLMIdentifier.toString('ascii', 0, 7)
+            if (identifier !== "NTLMSSP") throw new Error("Problem Decoding Buffer"); // should be NTLMSSP + 0x00
+
+            const type = response.getResponse().NTLMMessageType.toString('hex');
+            if (type !== "02000000") throw new Error("Message was not NTLMSSP Challenge (0x02)");
+
             connection.SessionId = header.SessionId;
 
-            connection.nonce = decodeType2(response.getResponse().Buffer);
+            connection.nonce = response.getResponse().ServerChallenge;
         }
     })
 };
@@ -179,13 +186,14 @@ const session_setup_step2 = (connection: IConnection, params: any) => {
             , 'ProcessId':connection.ProcessId
         }
         , request:{
-            'Buffer': ntlm.encodeType3(
-                connection.username
-                , connection.ip
-                , connection.domain
-                , connection.nonce
-                , connection.password
-            )
+            // 'Buffer': encodeType3(
+            //     connection.username
+            //     , connection.password
+            //     , connection.ip
+            //     , connection.domain
+            //     , connection.nonce
+            //     , connection.workstation
+            // )
         }
     })
 };

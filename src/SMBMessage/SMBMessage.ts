@@ -245,6 +245,7 @@ export class SMBMessage extends MessageDefaults {
             let length: string | number = this.structure.response[i][1] || 1;
 
             if (typeof length === "string") length = this.bufferToData(this.response[length]); // convert strings to integers
+
             this.response[key] = this.readData(buffer, offset, length);
             offset += length;
         }

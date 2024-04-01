@@ -43,11 +43,18 @@ export const structures: IStructureOptions = {
         ["Buffer", "SecurityBufferLength"],
         ],
         response: [
-        ["StructureSize", 2],
-        ["SessionFlags", 2],
-        ["SecurityBufferOffset", 2],
-        ["SecurityBufferLength", 2],
-        ["Buffer", "SecurityBufferLength"],
+            ["StructureSize", 2],
+            ["SessionFlags", 2],
+            ["SecurityBufferOffset", 2],
+            ["SecurityBufferLength", 2],
+            ["NTLMIdentifier", 8],
+            ["NTLMMessageType", 4],
+            ["NameLength", 2],
+            ["NameMaxLength", 2],
+            ["NameOffset", 4],
+            ["NegotiateFlags", 4],
+            ["ServerChallenge", 8],
+            ["Buffer", "SecurityBufferLength"] // this will overflow past the responses buffer, shouldn't cause problems as needed fields have been extracted
         ],
     },
     close: {
