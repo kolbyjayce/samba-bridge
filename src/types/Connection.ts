@@ -26,6 +26,7 @@ export interface IConnection {
     newResponse?: boolean;
     scheduledAutoClose?: any; // will be a function
     ServerChallenge?: any;
+    Type2Message?: any;
 }
 
 interface ResponseCallbacks {

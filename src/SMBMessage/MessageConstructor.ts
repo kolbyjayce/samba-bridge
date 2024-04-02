@@ -1,7 +1,7 @@
 import { SMBMessage } from "./SMBMessage"
 import { parseFiles } from "../services/fileParser";
 import { IConnection } from "../types/Connection";
-import { encodeType1 } from "../services/encryption";
+import { createType3Message, decodeType2Message, encodeType1 } from "../services/encryption";
 
 
 const close = (connection: IConnection, params: any) => {
@@ -162,18 +162,16 @@ const session_setup_step1 = (connection: IConnection, params?: any) => {
         }
         , successCode: 'STATUS_MORE_PROCESSING_REQUIRED'
         , onSuccess(connection: IConnection, response: any) {
-            console.log("TYPE", typeof response.getResponse().Buffer);
-            const header = response.getHeaders();
-            
-            const identifier = response.getResponse().NTLMIdentifier.toString('ascii', 0, 7)
-            if (identifier !== "NTLMSSP") throw new Error("Problem Decoding Buffer"); // should be NTLMSSP + 0x00
+            try {
+                const type2MessageBuffer = response.getResponse().Buffer;
+                const decodedType2Message = decodeType2Message(type2MessageBuffer);
 
-            const type = response.getResponse().NTLMMessageType.toString('hex');
-            if (type !== "02000000") throw new Error("Message was not NTLMSSP Challenge (0x02)");
+                connection.Type2Message = decodedType2Message;
 
-            connection.SessionId = header.SessionId;
-
-            connection.nonce = response.getResponse().ServerChallenge;
+                connection.SessionId = response.getHeaders().SessionId;
+            } catch (err) {
+                console.error("An error occurred while parsing the type 2 NTLMSSP Response:", err);
+            }
         }
     })
 };
@@ -186,14 +184,13 @@ const session_setup_step2 = (connection: IConnection, params: any) => {
             , 'ProcessId':connection.ProcessId
         }
         , request:{
-            // 'Buffer': encodeType3(
-            //     connection.username
-            //     , connection.password
-            //     , connection.ip
-            //     , connection.domain
-            //     , connection.nonce
-            //     , connection.workstation
-            // )
+            'Buffer': createType3Message(
+                connection.Type2Message
+                , connection.username
+                , connection.password
+                , connection.workstation
+                , connection.domain
+            )
         }
     })
 };

@@ -1,23 +1,32 @@
-/*
- * Permission to use, copy, modify, and/or distribute this software for any
- * purpose with or without fee is hereby granted, provided that the above
- * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
- * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
- * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
- * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
- *
- * Copyright (C) 2012  Joshua M. Clulow <josh@sysmgr.org>
- */
-
-// import { lmhashbuf, nthashbuf } from "./hashing";
-import crypto from "crypto";
 import * as os from "os";
-import { createLMv2Response, createNTLMHash, createPseudoRandomValue } from "./hashing";
+import { createLMv2Response, createNTLMHash, createNTLMv2Response, createPseudoRandomValue } from "./hashing";
+
+export type NTLMType2Decoded = {
+    flags: number;
+    encoding: 'ascii' | 'ucs2';
+    version: number;
+    challenge: Buffer;
+    targetName: string;
+    targetInfo?: {
+        parsed: parsedMessage;
+        buffer: Buffer;
+    };
+};
+
+interface parsedMessage {
+    SERVER?: String;
+    DOMAIN?: string;
+    FQDN?: string;
+    DNS?: string;
+    PARENT_DNS?: string;
+}
+
+const NTLMSIGNATURE = 'NTLMSSP\0';
+const flags = {
+    NTLMFLAG_NEGOTIATE_OEM: 0x02,
+    NTLMFLAG_NEGOTIATE_NTLM2_KEY: 0x04,
+    NTLMFLAG_NEGOTIATE_TARGET_INFO: 0x08,
+};
 
 const encodeType1 = (hostname: string, domain: string) => {
     hostname = hostname.toUpperCase();
@@ -77,84 +86,158 @@ const encodeType1 = (hostname: string, domain: string) => {
     return buf;
 }
 
-// function encodeType3(username: string, password: string, hostname: string, ntdomain: string, challenge: Buffer, workstation: string): Buffer {
-//     let dataPos = 52;
-//     const buf = Buffer.alloc(1024);
+function decodeType2Message(buf: Buffer): NTLMType2Decoded {
+    let obj: NTLMType2Decoded = {
+        flags: 0,
+        encoding: 'ascii',
+        version: 1,
+        challenge: Buffer.alloc(0),
+        targetName: '',
+    };
 
-//     if (!workstation) {
-//         workstation = os.hostname();
-//     }
+    // Check signature
+    if (buf.toString('ascii', 0, NTLMSIGNATURE.length) !== NTLMSIGNATURE) {
+        throw new Error('Invalid message signature');
+    }
 
-//     const signature = "NTLMSSP\0"
-//     buf.write(signature, 0, signature.length, 'ascii');
+    // Check message type
+    if (buf.readUInt32LE(NTLMSIGNATURE.length) !== 2) {
+        throw new Error('Message was not NTLMSSP Challenge (0x02)');
+    }
 
-//     buf.writeUInt32LE(3, 8); // set message type
+    // Read flags
+    obj.flags = buf.readUInt32LE(20);
+    obj.encoding = (obj.flags & flags.NTLMFLAG_NEGOTIATE_OEM) ? 'ascii' : 'ucs2';
+    obj.version = (obj.flags & flags.NTLMFLAG_NEGOTIATE_NTLM2_KEY) ? 2 : 1;
 
-//     dataPos = 64;
+    // Read challenge
+    obj.challenge = buf.slice(24, 32);
 
-//     let ntlmHash = createNTLMHash(password),
-//         nonce = createPseudoRandomValue(16),
-//         lmv2 = createLMv2Response(challenge, username, ntlmHash, nonce, target),
-//         ntlmv2 = hash.createNTLMv2Response(type2Message, username, ntlmHash, nonce, target);
+    // Read target name
+    let targetNameLength = buf.readUInt16LE(12);
+    let targetNameOffset = buf.readUInt32LE(16);
+    if (targetNameLength > 0) {
+        obj.targetName = buf.toString(obj.encoding, targetNameOffset, targetNameOffset + targetNameLength);
+    }
 
-//     //lmv2 security buffer
-//     buf.writeUInt16LE(lmv2.length, 12);
-//     buf.writeUInt16LE(lmv2.length, 14);
-//     buf.writeUInt32LE(dataPos, 16);
+    // Read target info
+    let targetInfoLength = buf.readUInt16LE(40);
+    let targetInfoOffset = buf.readUInt32LE(44);
+    let targetInfoBuffer = buf.slice(targetInfoOffset, targetInfoOffset + targetInfoLength);
 
-//     lmv2.copy(buf, dataPos);
-//     dataPos += lmv2.length;
+    obj.targetInfo = {
+        parsed: parseTargetInfo(targetInfoBuffer, obj.encoding),
+        buffer: targetInfoBuffer
+    };
+
+    return obj;
+}
+
+function createType3Message(
+    type2Message: NTLMType2Decoded,
+    username: string,
+    password: string,
+    workstation: string = os.hostname(),
+    target: string = ''
+): Buffer {
+    let dataPos = 52;
+    const buf = Buffer.alloc(1024);
+
+    target = target || type2Message.targetName;
+    username = username.toUpperCase();
+
+    // Signature
+    buf.write(NTLMSIGNATURE, 0, NTLMSIGNATURE.length, 'ascii');
+
+    // Message type
+    buf.writeUInt32LE(3, 8);
+
     
-//     //ntlmv2 security buffer
-//     buf.writeUInt16LE(ntlmv2.length, 20);
-//     buf.writeUInt16LE(ntlmv2.length, 22);
-//     buf.writeUInt32LE(dataPos, 24);
+    if (type2Message.version !== 2) throw new Error("NTLM Version 1 is not supported. Please check with your domain administrator to upgrade.");
+    
+    dataPos = 64;
+    
+    const ntlmHash = createNTLMHash(password);
+    const nonce = createPseudoRandomValue(16);
+    const lmv2 = createLMv2Response(type2Message, username, ntlmHash, nonce, target);
+    const ntlmv2 = createNTLMv2Response(type2Message, username, ntlmHash, nonce, target);
 
-//     ntlmv2.copy(buf, dataPos);
-//     dataPos += ntlmv2.length;
-// }
+    // lmv2 security buffer
+    buf.writeUInt16LE(lmv2.length, 12);
+    buf.writeUInt16LE(lmv2.length, 14);
+    buf.writeUInt32LE(dataPos, 16);
 
-export { encodeType1 }
+    lmv2.copy(buf, dataPos);
+    dataPos += lmv2.length;
+
+    // ntlmv2 buffer
+    buf.writeUInt16LE(ntlmv2.length, 20);
+    buf.writeUInt16LE(ntlmv2.length, 22);
+    buf.writeUInt32LE(dataPos, 24);
+
+    ntlmv2.copy(buf, dataPos);
+    dataPos += ntlmv2.length;
+
+	//target name security buffer
+	buf.writeUInt16LE(type2Message.encoding === 'ascii' ? target.length : target.length * 2, 28);
+	buf.writeUInt16LE(type2Message.encoding === 'ascii' ? target.length : target.length * 2, 30);
+	buf.writeUInt32LE(dataPos, 32);
+
+	dataPos += buf.write(target, dataPos, type2Message.encoding);
+
+	//user name security buffer
+	buf.writeUInt16LE(type2Message.encoding === 'ascii' ? username.length : username.length * 2, 36);
+	buf.writeUInt16LE(type2Message.encoding === 'ascii' ? username.length : username.length * 2, 38);
+	buf.writeUInt32LE(dataPos, 40);
+
+	dataPos += buf.write(username, dataPos, type2Message.encoding);
+
+	//workstation name security buffer
+	buf.writeUInt16LE(type2Message.encoding === 'ascii' ? workstation.length : workstation.length * 2, 44);
+	buf.writeUInt16LE(type2Message.encoding === 'ascii' ? workstation.length : workstation.length * 2, 46);
+	buf.writeUInt32LE(dataPos, 48);
+
+	dataPos += buf.write(workstation, dataPos, type2Message.encoding);
+
+    //session key security buffer
+    buf.writeUInt16LE(0, 52);
+    buf.writeUInt16LE(0, 54);
+    buf.writeUInt32LE(0, 56);
+
+    //flags
+    buf.writeUInt32LE(type2Message.flags, 60);
+
+    return buf.subarray(0, dataPos);
+}
+
+
+export { encodeType1, decodeType2Message, createType3Message }
 
 /** HELPER FUNCTIONS */
 
-function createHmacMd5(key: Buffer, data: Buffer): Buffer {
-    return crypto.createHmac('md5', key).update(data).digest();
-}
+function parseTargetInfo(buffer: Buffer, encoding: 'ascii' | 'ucs2'): parsedMessage {
+    let info: parsedMessage = {};
+    let pos = 0;
 
-function ntHash(input: string): Buffer {
-    return crypto.createHash('md4').update(Buffer.from(input, 'utf16le')).digest();
-}
+    while (pos < buffer.length) {
+        let blockType = buffer.readUInt16LE(pos);
+        pos += 2;
+        let blockLength = buffer.readUInt16LE(pos);
+        pos += 2;
 
-function ntowfv2(password: string, username: string, domain: string): Buffer {
-    const userDomain = Buffer.from(username.toUpperCase() + domain, 'utf16le');
-    return createHmacMd5(ntHash(password), userDomain);
-}
+        if (blockType === 0) break; // Terminator block
 
-function generateNTLMv2Blob(serverChallenge: Buffer, clientChallenge: Buffer, domain: string, username: string): Buffer {
-    const timestamp = getCurrentTimeForNTLM();
-    // Assuming Blob starts with a signature, a reserved field, timestamp, challenges, and ends with domain name information
-    // Signature: 0x01010000, Reserved: 0x00000000, Timestamp, Challenge, Domain
-    // This part is highly simplified and needs to include all parts of the blob as per NTLMv2 specifications
-    const blobSignature = Buffer.from('01010000', 'hex');
-    const reserved = Buffer.alloc(4, 0);
-    const domainNameBuffer = Buffer.from(domain.toUpperCase(), 'utf16le');
-    const blob = Buffer.concat([blobSignature, reserved, timestamp, clientChallenge, reserved, domainNameBuffer]); // Simplified
-    return blob;
-}
+        let blockData = buffer.toString(encoding, pos, pos + blockLength);
+        pos += blockLength;
 
-function generateNTLMv2Response(serverChallenge: Buffer, password: string, username: string, domain: string): Buffer {
-    const v2Hash = ntowfv2(password, username, domain);
-    const clientChallenge = crypto.randomBytes(8);
-    const blob = generateNTLMv2Blob(serverChallenge, clientChallenge, domain, username);
-    return createHmacMd5(v2Hash, Buffer.concat([serverChallenge, blob]));
-}
+        switch (blockType) {
+            case 1: info.SERVER = blockData; break;
+            case 2: info.DOMAIN = blockData; break;
+            case 3: info.FQDN = blockData; break;
+            case 4: info.DNS = blockData; break;
+            case 5: info.PARENT_DNS = blockData; break;
+        }
+    }
 
-function getCurrentTimeForNTLM(): Buffer {
-    const ntEpoch = BigInt(Date.UTC(1601, 0, 1));
-    const unixEpoch = BigInt(Date.UTC(1970, 0, 1));
-    const time = (BigInt(Date.now()) + (unixEpoch - ntEpoch)) * BigInt(10000);
-    const buffer = Buffer.alloc(8);
-    buffer.writeBigUInt64LE(time);
-    return buffer;
+    return info;
 }

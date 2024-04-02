@@ -26,6 +26,7 @@ export class SMB {
             username: options.username,
             password: options.password,
             domain: options.domain,
+            workstation: options.workstation,
             SessionId: Math.floor(Math.random() * 256) & 0xFF,
             ProcessId: PIDGenerator.generatePID(),
             debug: options.debug ? options.debug : false,

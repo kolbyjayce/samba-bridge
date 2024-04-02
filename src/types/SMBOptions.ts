@@ -4,6 +4,7 @@ export interface SMBOptions {
   username: string;
   password: string;
   domain: string;
+  workstation: string;
   port?: number;
   packetConcurrency?: number;
   autoCloseTimeout?: number;
